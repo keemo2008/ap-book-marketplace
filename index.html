@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AP Book Marketplace</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+</head>
+<body class="bg-gray-50">
+    <div id="root"></div>
+
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Firebase Configuration (Already configured with your credentials!)
+        const firebaseConfig = {
+            apiKey: "AIzaSyBRg0MdHnYkMydBckMdI9QVnYPTA7mKns4",
+            authDomain: "ap-books-web.firebaseapp.com",
+            projectId: "ap-books-web",
+            storageBucket: "ap-books-web.firebasestorage.app",
+            messagingSenderId: "1017277101927",
+            appId: "1:1017277101927:web:575c2d238d15f30a2ee1c2",
+            measurementId: "G-GWDFWJWX8W"
+        };
+
+        // Initialize Firebase
+        let db = null;
+        let auth = null;
+        let firebaseInitialized = false;
+
+        try {
+            if (!firebase.apps.length) {
+                firebase.initializeApp(firebaseConfig);
+            }
+            db = firebase.firestore();
+            auth = firebase.auth();
+            firebaseInitialized = true;
+            console.log("✅ Firebase initialized successfully!");
+        } catch (error) {
+            console.error("❌ Firebase initialization error:", error);
+        }
+
+        function App() {
+            const [currentView, setCurrentView] = useState('browse');
+            const [books, setBooks] = useState([]);
+            const [selectedBook, setSelectedBook] = useState(null);
+            const [currentUser, setCurrentUser] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [authChecked, setAuthChecked] = useState(false);
+
+            // Check authentication state
+            useEffect(() => {
+                if (!firebaseInitialized || !auth) {
+                    setLoading(false);
+                    setAuthChecked(true);
+                    return;
+                }
+
+                const unsubscribe = auth.onAuthStateChanged((user) => {
+                    if (user) {
+                        setCurrentUser({
+                            id: user.uid,
+                            name: user.displayName || user.email.split('@')[0],
+                            email: user.email
+                        });
+                    } else {
+                        setCurrentUser(null);
+                    }
+                    setAuthChecked(true);
+                    setLoading(false);
+                });
+
+                return () => unsubscribe();
+            }, []);
+
+            // Load books from Firebase
+            useEffect(() => {
+                if (!firebaseInitialized || !db) {
+                    setLoading(false);
+                    return;
+                }
+
+                const unsubscribe = db.collection('books')
+                    .orderBy('createdAt', 'desc')
+                    .onSnapshot(
+                        (snapshot) => {
+                            const booksData = snapshot.docs.map(doc => ({
+                                id: doc.id,
+                                ...doc.data()
+                            }));
+                            setBooks(booksData);
+                            setLoading(false);
+                            console.log(`📚 Loaded ${booksData.length} books from Firebase`);
+                        },
+                        (error) => {
+                            console.error("Error loading books:", error);
+                            setLoading(false);
+                        }
+                    );
+
+                return () => unsubscribe();
+            }, []);
+
+            // Add a new book to Firebase
+            const addBook = async (bookData) => {
+                if (!firebaseInitialized || !db) {
+                    alert("⚠️ Firebase not configured. Cannot add books.");
+                    return;
+                }
+
+                try {
+                    const newBook = {
+                        ...bookData,
+                        sellerId: currentUser.id,
+                        sellerName: currentUser.name,
+                        sellerEmail: currentUser.email,
+                        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                        status: 'available'
+                    };
+
+                    await db.collection('books').add(newBook);
+                    alert('✅ Book listed successfully!');
+                    setCurrentView('browse');
+                } catch (error) {
+                    console.error("Error adding book:", error);
+                    alert("❌ Error listing book. Please try again.");
+                }
+            };
+
+            // Delete a book from Firebase
+            const deleteBook = async (bookId) => {
+                if (!firebaseInitialized || !db) {
+                    alert("⚠️ Firebase not configured.");
+                    return;
+                }
+
+                if (!window.confirm('Are you sure you want to delete this listing?')) {
+                    return;
+                }
+
+                try {
+                    await db.collection('books').doc(bookId).delete();
+                    alert('✅ Book removed successfully!');
+                    setSelectedBook(null);
+                    setCurrentView('browse');
+                } catch (error) {
+                    console.error("Error deleting book:", error);
+                    alert("❌ Error deleting book. Please try again.");
+                }
+            };
+
+            // Filter books
+            const filteredBooks = books.filter(book =>
+                book.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                book.subject.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+
+            const myListings = books.filter(book => book.sellerId === currentUser?.id);
+
+            if (loading || !authChecked) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center">
+                        <div className="text-center">
+                            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                            <p className="text-gray-600">Loading...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            // Show login screen if not authenticated
+            if (!currentUser) {
+                return <AuthScreen />;
+            }
+
+            return (
+                <div className="min-h-screen flex flex-col">
+                    {/* Header */}
+                    <header className="bg-gradient-to-r from-blue-600 to-blue-700 text-white shadow-lg">
+                        <div className="container mx-auto px-4 py-4">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center space-x-3">
+                                    <div className="text-3xl">📚</div>
+                                    <div>
+                                        <h1 className="text-2xl font-bold">AP Book Marketplace</h1>
+                                        <p className="text-sm text-blue-100">Buy & sell used AP textbooks</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <div className="text-right hidden sm:block">
+                                        <p className="text-sm text-blue-100">Logged in as</p>
+                                        <p className="font-semibold">{currentUser?.email}</p>
+                                    </div>
+                                    {firebaseInitialized ? (
+                                        <div className="bg-green-500 px-3 py-1 rounded-full text-xs font-semibold">
+                                            ✅ Connected
+                                        </div>
+                                    ) : (
+                                        <div className="bg-red-500 px-3 py-1 rounded-full text-xs font-semibold">
+                                            ⚠️ Offline
+                                        </div>
+                                    )}
+                                    <button
+                                        onClick={() => auth.signOut()}
+                                        className="bg-white bg-opacity-20 hover:bg-opacity-30 px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
+                                    >
+                                        Sign Out
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Navigation */}
+                    <nav className="bg-white border-b shadow-sm sticky top-0 z-40">
+                        <div className="container mx-auto px-4">
+                            <div className="flex space-x-1 overflow-x-auto">
+                                <NavButton 
+                                    active={currentView === 'browse'} 
+                                    onClick={() => setCurrentView('browse')}
+                                    icon="🏠"
+                                >
+                                    Browse ({filteredBooks.length})
+                                </NavButton>
+                                <NavButton 
+                                    active={currentView === 'list'} 
+                                    onClick={() => setCurrentView('list')}
+                                    icon="+"
+                                >
+                                    List a Book
+                                </NavButton>
+                                <NavButton 
+                                    active={currentView === 'myListings'} 
+                                    onClick={() => setCurrentView('myListings')}
+                                    icon="📋"
+                                >
+                                    My Listings ({myListings.length})
+                                </NavButton>
+                                <NavButton 
+                                    active={currentView === 'profile'} 
+                                    onClick={() => setCurrentView('profile')}
+                                    icon="👤"
+                                >
+                                    Profile
+                                </NavButton>
+                            </div>
+                        </div>
+                    </nav>
+
+                    {/* Main Content */}
+                    <main className="flex-1 container mx-auto px-4 py-6">
+                        {currentView === 'browse' && (
+                            <BrowseView 
+                                books={filteredBooks}
+                                searchTerm={searchTerm}
+                                setSearchTerm={setSearchTerm}
+                                onBookClick={setSelectedBook}
+                                firebaseConfigured={firebaseInitialized}
+                            />
+                        )}
+                        {currentView === 'list' && (
+                            <ListBookView 
+                                onSubmit={addBook}
+                                firebaseConfigured={firebaseInitialized}
+                            />
+                        )}
+                        {currentView === 'myListings' && (
+                            <MyListingsView 
+                                listings={myListings}
+                                onDelete={deleteBook}
+                                onBookClick={setSelectedBook}
+                            />
+                        )}
+                        {currentView === 'profile' && (
+                            <ProfileView 
+                                user={currentUser}
+                            />
+                        )}
+                    </main>
+
+                    {/* Book Detail Modal */}
+                    {selectedBook && (
+                        <BookDetailModal 
+                            book={selectedBook} 
+                            onClose={() => setSelectedBook(null)}
+                            currentUser={currentUser}
+                            onDelete={deleteBook}
+                        />
+                    )}
+                </div>
+            );
+        }
+
+        // Auth Screen Component
+        function AuthScreen() {
+            const [isLogin, setIsLogin] = useState(true);
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [confirmPassword, setConfirmPassword] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState('');
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setError('');
+                setLoading(true);
+
+                if (!firebaseInitialized || !auth) {
+                    setError('Firebase not configured. Please check your setup.');
+                    setLoading(false);
+                    return;
+                }
+
+                try {
+                    if (isLogin) {
+                        // Login
+                        await auth.signInWithEmailAndPassword(email, password);
+                    } else {
+                        // Sign up
+                        if (password !== confirmPassword) {
+                            setError('Passwords do not match');
+                            setLoading(false);
+                            return;
+                        }
+                        if (password.length < 6) {
+                            setError('Password must be at least 6 characters');
+                            setLoading(false);
+                            return;
+                        }
+                        await auth.createUserWithEmailAndPassword(email, password);
+                    }
+                } catch (err) {
+                    console.error('Auth error:', err);
+                    if (err.code === 'auth/email-already-in-use') {
+                        setError('Email already in use. Try logging in instead.');
+                    } else if (err.code === 'auth/invalid-email') {
+                        setError('Invalid email address.');
+                    } else if (err.code === 'auth/user-not-found') {
+                        setError('No account found with this email.');
+                    } else if (err.code === 'auth/wrong-password') {
+                        setError('Incorrect password.');
+                    } else if (err.code === 'auth/weak-password') {
+                        setError('Password is too weak.');
+                    } else {
+                        setError(err.message || 'An error occurred. Please try again.');
+                    }
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8">
+                        <div className="text-center mb-8">
+                            <div className="text-6xl mb-4">📚</div>
+                            <h1 className="text-3xl font-bold text-gray-800 mb-2">AP Book Marketplace</h1>
+                            <p className="text-gray-600">Buy & sell used AP textbooks</p>
+                        </div>
+
+                        {!firebaseInitialized && (
+                            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+                                <p className="text-red-800 text-sm font-semibold">
+                                    ⚠️ Firebase not configured. Authentication won't work.
+                                </p>
+                            </div>
+                        )}
+
+                        <div className="flex gap-2 mb-6">
+                            <button
+                                onClick={() => {
+                                    setIsLogin(true);
+                                    setError('');
+                                }}
+                                className={`flex-1 py-2 rounded-lg font-semibold transition-colors ${
+                                    isLogin
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                }`}
+                            >
+                                Login
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setIsLogin(false);
+                                    setError('');
+                                }}
+                                className={`flex-1 py-2 rounded-lg font-semibold transition-colors ${
+                                    !isLogin
+                                        ? 'bg-blue-600 text-white'
+                                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                }`}
+                            >
+                                Sign Up
+                            </button>
+                        </div>
+
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Email
+                                </label>
+                                <input
+                                    type="email"
+                                    required
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    placeholder="your.email@example.com"
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Password
+                                </label>
+                                <input
+                                    type="password"
+                                    required
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    placeholder="••••••••"
+                                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                            </div>
+
+                            {!isLogin && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        Confirm Password
+                                    </label>
+                                    <input
+                                        type="password"
+                                        required
+                                        value={confirmPassword}
+                                        onChange={(e) => setConfirmPassword(e.target.value)}
+                                        placeholder="••••••••"
+                                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    />
+                                </div>
+                            )}
+
+                            {error && (
+                                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                                    <p className="text-red-800 text-sm">{error}</p>
+                                </div>
+                            )}
+
+                            <button
+                                type="submit"
+                                disabled={loading || !firebaseInitialized}
+                                className={`w-full py-3 rounded-lg font-semibold transition-colors ${
+                                    loading || !firebaseInitialized
+                                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                        : 'bg-blue-600 text-white hover:bg-blue-700'
+                                }`}
+                            >
+                                {loading ? 'Please wait...' : isLogin ? '🔐 Login' : '✨ Create Account'}
+                            </button>
+                        </form>
+
+                        {!isLogin && (
+                            <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                <p className="text-xs text-blue-800">
+                                    <strong>📝 Note:</strong> Password must be at least 6 characters long.
+                                    Your account will be used to manage your book listings.
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // Navigation Button Component
+        function NavButton({ active, onClick, icon, children }) {
+            return (
+                <button
+                    onClick={onClick}
+                    className={`px-4 py-3 font-medium whitespace-nowrap transition-colors ${
+                        active 
+                            ? 'text-blue-600 border-b-2 border-blue-600' 
+                            : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                >
+                    <span className="mr-2">{icon}</span>
+                    {children}
+                </button>
+            );
+        }
+
+        // Browse View Component
+        function BrowseView({ books, searchTerm, setSearchTerm, onBookClick, firebaseConfigured }) {
+            const [filter, setFilter] = useState('all'); // 'all', 'sale', 'free'
+
+            // Apply filter
+            const displayBooks = books.filter(book => {
+                if (filter === 'free') return book.isDonation || parseFloat(book.price) === 0;
+                if (filter === 'sale') return !book.isDonation && parseFloat(book.price) > 0;
+                return true; // 'all'
+            });
+
+            return (
+                <div>
+                    {!firebaseConfigured && (
+                        <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-6">
+                            <div className="flex">
+                                <div className="flex-shrink-0">
+                                    <span className="text-2xl">⚠️</span>
+                                </div>
+                                <div className="ml-3">
+                                    <h3 className="text-sm font-bold text-red-800">Firebase Connection Failed</h3>
+                                    <p className="text-sm text-red-700 mt-1">
+                                        Check your internet connection and Firebase configuration.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <div className="mb-6">
+                        <input
+                            type="text"
+                            placeholder="🔍 Search by title or subject..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                    </div>
+
+                    {/* Filter Buttons */}
+                    <div className="flex gap-2 mb-6">
+                        <button
+                            onClick={() => setFilter('all')}
+                            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                                filter === 'all' 
+                                    ? 'bg-blue-600 text-white' 
+                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                        >
+                            All Books ({books.length})
+                        </button>
+                        <button
+                            onClick={() => setFilter('sale')}
+                            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                                filter === 'sale' 
+                                    ? 'bg-blue-600 text-white' 
+                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                        >
+                            💰 For Sale ({books.filter(b => !b.isDonation && parseFloat(b.price) > 0).length})
+                        </button>
+                        <button
+                            onClick={() => setFilter('free')}
+                            className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                                filter === 'free' 
+                                    ? 'bg-green-600 text-white' 
+                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                        >
+                            🎁 Free ({books.filter(b => b.isDonation || parseFloat(b.price) === 0).length})
+                        </button>
+                    </div>
+
+                    {displayBooks.length === 0 ? (
+                        <div className="text-center py-12">
+                            <div className="text-6xl mb-4">📚</div>
+                            <h3 className="text-xl font-semibold text-gray-700 mb-2">
+                                {firebaseConfigured ? `No ${filter === 'free' ? 'free' : filter === 'sale' ? 'books for sale' : 'books'} yet` : 'Unable to load books'}
+                            </h3>
+                            <p className="text-gray-500">
+                                {firebaseConfigured ? 'Be the first to list a book!' : 'Check your Firebase connection'}
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {displayBooks.map(book => (
+                                <BookCard 
+                                    key={book.id} 
+                                    book={book} 
+                                    onClick={() => onBookClick(book)}
+                                />
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // Book Card Component
+        function BookCard({ book, onClick }) {
+            const conditionColors = {
+                'Like New': 'bg-green-100 text-green-800',
+                'Good': 'bg-blue-100 text-blue-800',
+                'Fair': 'bg-yellow-100 text-yellow-800',
+                'Poor': 'bg-red-100 text-red-800'
+            };
+
+            const isDonation = book.isDonation || parseFloat(book.price) === 0;
+
+            return (
+                <div 
+                    onClick={onClick}
+                    className="bg-white rounded-lg shadow-md hover:shadow-xl transition-all cursor-pointer overflow-hidden transform hover:-translate-y-1"
+                >
+                    <div className={`${isDonation ? 'bg-gradient-to-br from-green-500 to-green-600' : 'bg-gradient-to-br from-blue-500 to-blue-600'} text-white p-6 text-center relative`}>
+                        {isDonation && (
+                            <div className="absolute top-2 right-2 bg-yellow-400 text-green-900 px-2 py-1 rounded-full text-xs font-bold">
+                                🎁 DONATION
+                            </div>
+                        )}
+                        <div className="text-4xl mb-2">📖</div>
+                        <div className="text-2xl font-bold">
+                            {isDonation ? 'FREE' : `$${book.price}`}
+                        </div>
+                    </div>
+                    <div className="p-4">
+                        <h3 className="font-bold text-lg mb-2 line-clamp-2 h-14">{book.title}</h3>
+                        <div className="space-y-2 text-sm">
+                            <div className="flex items-center text-gray-600">
+                                <span className="mr-2">📚</span>
+                                <span className="font-medium">{book.subject}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${conditionColors[book.condition]}`}>
+                                    {book.condition}
+                                </span>
+                                <span className="text-gray-500 text-xs truncate ml-2">
+                                    by {book.sellerName}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Book Detail Modal
+        function BookDetailModal({ book, onClose, currentUser, onDelete }) {
+            const isOwnListing = book.sellerId === currentUser?.id;
+            const isDonation = book.isDonation || parseFloat(book.price) === 0;
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={onClose}>
+                    <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                        <div className="sticky top-0 bg-white border-b px-6 py-4 flex justify-between items-center">
+                            <h2 className="text-2xl font-bold">Book Details</h2>
+                            <button 
+                                onClick={onClose}
+                                className="text-gray-500 hover:text-gray-700 text-3xl leading-none"
+                            >
+                                ×
+                            </button>
+                        </div>
+                        
+                        <div className="p-6">
+                            <div className={`${isDonation ? 'bg-gradient-to-br from-green-500 to-green-600' : 'bg-gradient-to-br from-blue-500 to-blue-600'} text-white p-8 rounded-lg text-center mb-6 relative`}>
+                                {isDonation && (
+                                    <div className="absolute top-4 right-4 bg-yellow-400 text-green-900 px-3 py-1 rounded-full text-sm font-bold">
+                                        🎁 DONATION
+                                    </div>
+                                )}
+                                <div className="text-6xl mb-4">📖</div>
+                                <div className="text-4xl font-bold mb-2">
+                                    {isDonation ? 'FREE' : `$${book.price}`}
+                                </div>
+                                <div className={isDonation ? 'text-green-100' : 'text-blue-100'}>
+                                    {isDonation ? 'Free donation - pay it forward!' : 'Listed price'}
+                                </div>
+                            </div>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="text-sm font-semibold text-gray-600 block mb-1">Title</label>
+                                    <p className="text-lg font-medium">{book.title}</p>
+                                </div>
+                                
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-sm font-semibold text-gray-600 block mb-1">Subject</label>
+                                        <p>{book.subject}</p>
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-semibold text-gray-600 block mb-1">Condition</label>
+                                        <p>{book.condition}</p>
+                                    </div>
+                                </div>
+
+                                {book.isbn && (
+                                    <div>
+                                        <label className="text-sm font-semibold text-gray-600 block mb-1">ISBN</label>
+                                        <p className="font-mono text-sm">{book.isbn}</p>
+                                    </div>
+                                )}
+
+                                {book.description && (
+                                    <div>
+                                        <label className="text-sm font-semibold text-gray-600 block mb-1">Description</label>
+                                        <p className="text-gray-700">{book.description}</p>
+                                    </div>
+                                )}
+
+                                <div className="border-t pt-4">
+                                    <label className="text-sm font-semibold text-gray-600 block mb-2">Seller Information</label>
+                                    <div className="bg-gray-50 rounded-lg p-3">
+                                        <p className="font-medium">{book.sellerName}</p>
+                                        <p className="text-gray-600 text-sm">{book.sellerEmail}</p>
+                                    </div>
+                                </div>
+
+                                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                                    <p className="font-semibold text-yellow-800 mb-2">⚠️ Safety Tips</p>
+                                    <ul className="text-xs text-yellow-700 space-y-1">
+                                        <li>• Meet in a public place (library, cafeteria, coffee shop)</li>
+                                        <li>• Bring a friend if possible</li>
+                                        <li>• Check the book condition before {isDonation ? 'accepting' : 'paying'}</li>
+                                        {!isDonation && <li>• Only use approved payment methods</li>}
+                                    </ul>
+                                </div>
+                            </div>
+
+                            <div className="mt-6 flex gap-3">
+                                {isOwnListing ? (
+                                    <>
+                                        <button
+                                            onClick={() => onDelete(book.id)}
+                                            className="flex-1 bg-red-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-red-700 transition-colors"
+                                        >
+                                            🗑️ Delete Listing
+                                        </button>
+                                        <button
+                                            onClick={onClose}
+                                            className="flex-1 bg-gray-200 text-gray-700 px-6 py-3 rounded-lg font-semibold hover:bg-gray-300 transition-colors"
+                                        >
+                                            Close
+                                        </button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <button
+                                            onClick={() => window.location.href = `mailto:${book.sellerEmail}?subject=${isDonation ? 'Request for' : 'Interest in'} ${encodeURIComponent(book.title)}&body=Hi ${book.sellerName},%0D%0A%0D%0AI'm interested in ${isDonation ? 'receiving' : 'purchasing'} your AP book "${book.title}"${isDonation ? '' : ` listed for $${book.price}`}.%0D%0A%0D%0AWhen would be a good time to meet?`}
+                                            className={`flex-1 ${isDonation ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700'} text-white px-6 py-3 rounded-lg font-semibold transition-colors`}
+                                        >
+                                            📧 Contact Seller
+                                        </button>
+                                        <button
+                                            onClick={onClose}
+                                            className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition-colors"
+                                        >
+                                            Close
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // List Book View
+        function ListBookView({ onSubmit, firebaseConfigured }) {
+            const [formData, setFormData] = useState({
+                title: '',
+                subject: 'Biology',
+                condition: 'Good',
+                price: '',
+                isbn: '',
+                description: '',
+                isDonation: false
+            });
+
+            const subjects = [
+                'Biology', 'Chemistry', 'Physics', 'Calculus AB', 'Calculus BC',
+                'Statistics', 'US History', 'World History', 'European History',
+                'English Language', 'English Literature', 'Psychology',
+                'Economics', 'Government', 'Environmental Science', 'Computer Science',
+                'Spanish', 'French', 'Chinese', 'Other'
+            ];
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if (!formData.title || (!formData.price && !formData.isDonation)) {
+                    alert('Please fill in all required fields');
+                    return;
+                }
+                // Set price to 0 for donations
+                const bookData = {
+                    ...formData,
+                    price: formData.isDonation ? '0' : formData.price
+                };
+                onSubmit(bookData);
+                setFormData({
+                    title: '',
+                    subject: 'Biology',
+                    condition: 'Good',
+                    price: '',
+                    isbn: '',
+                    description: '',
+                    isDonation: false
+                });
+            };
+
+            return (
+                <div className="max-w-2xl mx-auto">
+                    <div className="bg-white rounded-lg shadow-md p-6">
+                        <h2 className="text-2xl font-bold mb-6">List Your AP Book</h2>
+                        
+                        {!firebaseConfigured && (
+                            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+                                <p className="text-yellow-800 text-sm font-semibold">
+                                    ⚠️ Firebase not connected. Books cannot be saved.
+                                </p>
+                            </div>
+                        )}
+
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Book Title *
+                                </label>
+                                <input
+                                    type="text"
+                                    required
+                                    value={formData.title}
+                                    onChange={(e) => setFormData({...formData, title: e.target.value})}
+                                    placeholder="e.g., Campbell Biology 11th Edition"
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        Subject *
+                                    </label>
+                                    <select
+                                        required
+                                        value={formData.subject}
+                                        onChange={(e) => setFormData({...formData, subject: e.target.value})}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    >
+                                        {subjects.map(subject => (
+                                            <option key={subject} value={subject}>{subject}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        Condition *
+                                    </label>
+                                    <select
+                                        required
+                                        value={formData.condition}
+                                        onChange={(e) => setFormData({...formData, condition: e.target.value})}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    >
+                                        <option value="Like New">Like New</option>
+                                        <option value="Good">Good</option>
+                                        <option value="Fair">Fair</option>
+                                        <option value="Poor">Poor</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        Price ($) *
+                                    </label>
+                                    <input
+                                        type="number"
+                                        required={!formData.isDonation}
+                                        disabled={formData.isDonation}
+                                        min="0"
+                                        step="0.01"
+                                        value={formData.isDonation ? '0' : formData.price}
+                                        onChange={(e) => setFormData({...formData, price: e.target.value})}
+                                        placeholder="25.00"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:text-gray-500"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        ISBN (optional)
+                                    </label>
+                                    <input
+                                        type="text"
+                                        value={formData.isbn}
+                                        onChange={(e) => setFormData({...formData, isbn: e.target.value})}
+                                        placeholder="978-0134093413"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                                <label className="flex items-center cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={formData.isDonation}
+                                        onChange={(e) => setFormData({...formData, isDonation: e.target.checked, price: e.target.checked ? '0' : formData.price})}
+                                        className="w-5 h-5 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                                    />
+                                    <span className="ml-3">
+                                        <span className="text-sm font-semibold text-green-800">🎁 Donate this book for FREE</span>
+                                        <p className="text-xs text-green-700 mt-1">Check this box if you want to give away your book instead of selling it</p>
+                                    </span>
+                                </label>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Description (optional)
+                                </label>
+                                <textarea
+                                    value={formData.description}
+                                    onChange={(e) => setFormData({...formData, description: e.target.value})}
+                                    placeholder="Any additional details about the book's condition, included materials, etc."
+                                    rows="4"
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                />
+                            </div>
+
+                            <button
+                                type="submit"
+                                disabled={!firebaseConfigured}
+                                className={`w-full py-3 rounded-lg font-semibold transition-colors ${
+                                    firebaseConfigured
+                                        ? 'bg-blue-600 text-white hover:bg-blue-700'
+                                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                }`}
+                            >
+                                📚 List Book for Sale
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        // My Listings View
+        function MyListingsView({ listings, onDelete, onBookClick }) {
+            if (listings.length === 0) {
+                return (
+                    <div className="text-center py-12">
+                        <div className="text-6xl mb-4">📋</div>
+                        <h3 className="text-xl font-semibold text-gray-700 mb-2">
+                            No listings yet
+                        </h3>
+                        <p className="text-gray-500">
+                            Books you list will appear here
+                        </p>
+                    </div>
+                );
+            }
+
+            return (
+                <div>
+                    <h2 className="text-2xl font-bold mb-6">My Listings ({listings.length})</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {listings.map(book => (
+                            <div key={book.id} className="relative">
+                                <BookCard book={book} onClick={() => onBookClick(book)} />
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        onDelete(book.id);
+                                    }}
+                                    className="absolute top-2 right-2 bg-red-600 text-white w-10 h-10 rounded-full hover:bg-red-700 shadow-lg text-xl"
+                                    title="Delete listing"
+                                >
+                                    🗑️
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        // Profile View
+        function ProfileView({ user }) {
+            return (
+                <div className="max-w-2xl mx-auto">
+                    <div className="bg-white rounded-lg shadow-md p-6">
+                        <div className="flex items-center justify-between mb-6">
+                            <div className="flex items-center space-x-4">
+                                <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center text-4xl">
+                                    👤
+                                </div>
+                                <div>
+                                    <h2 className="text-2xl font-bold">Your Profile</h2>
+                                    <p className="text-gray-600 text-sm">Authenticated Account</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Email
+                                </label>
+                                <p className="text-lg bg-gray-50 px-4 py-3 rounded-lg">{user?.email}</p>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    Display Name
+                                </label>
+                                <p className="text-lg bg-gray-50 px-4 py-3 rounded-lg">{user?.name}</p>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    User ID
+                                </label>
+                                <p className="text-xs font-mono bg-gray-50 px-4 py-3 rounded-lg text-gray-600">{user?.id}</p>
+                            </div>
+
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-6">
+                                <p className="font-semibold text-blue-800 mb-2">ℹ️ About Your Profile</p>
+                                <p className="text-sm text-blue-700">
+                                    Your email will be visible to other users when you list books. 
+                                    Buyers will use this information to contact you about purchases.
+                                </p>
+                            </div>
+
+                            <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                                <p className="font-semibold text-green-800 mb-2">✅ Account Secured</p>
+                                <p className="text-sm text-green-700">
+                                    Your account is protected by Firebase Authentication. Only you can manage your listings.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // Render App
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
